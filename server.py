@@ -39,7 +39,7 @@ async def broadcast_updates():
     })
     
     # Send the same update to everyone
-    for client_websocket in clients.values():
+    for client_websocket in list(clients.values()):
         try:
             await client_websocket.send(update)
         except websockets.exceptions.ConnectionClosed:
@@ -247,6 +247,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
