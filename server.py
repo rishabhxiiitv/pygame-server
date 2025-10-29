@@ -4,6 +4,7 @@ import random
 import websockets
 import os
 import asyncio # Make sure this is imported
+import time
 
 # Constants
 WIDTH, HEIGHT = 800, 600
@@ -21,6 +22,8 @@ LOBBY_PASSWORD = ""
 game_state = "lobby"
 host_player_id = 0
 STATE_LOCK = asyncio.Lock() # <-- NEW: The master lock
+game_start_time = 0
+game_end_time = 0
 
 # --- Broadcast function (Safer) ---
 async def broadcast_updates():
@@ -34,9 +37,9 @@ async def broadcast_updates():
         "players": players,
         "resources": resources,
         "game_state": game_state,
-        "host_player_id": host_player_id
+        "host_player_id": host_player_id,
+        "game_end_time": game_end_time  # <-- ADD THIS LINE
     })
-    
     # Loop over a copy of the list, in case a client
     # disconnects *during* the broadcast
     for client_websocket in list(clients.values()):
@@ -180,9 +183,22 @@ async def handle_client(websocket):
                         broadcast_needed = True
                 
                 elif data["type"] == "start_game":
+                    global game_end_time, game_start_time
                     if player_id == host_player_id and game_state == "lobby":
+                        
+                        # Get duration from client, default to 2 mins
+                        duration_minutes = data.get("duration", 2)
+                        duration_seconds = duration_minutes * 60
+                        
+                        print(f"--- Game Started by Host (Player {player_id}) for {duration_minutes} minutes ---")
+
                         game_state = "playing"
-                        print(f"--- Game Started by Host (Player {player_id}) ---")
+                        game_start_time = time.time()
+                        game_end_time = game_start_time + duration_seconds
+                        
+                        # Start the background timer task
+                        asyncio.create_task(end_game_timer(duration_seconds))
+                        
                         broadcast_needed = True
             finally:
                 STATE_LOCK.release() # <-- Release lock
@@ -256,6 +272,36 @@ async def server_main():
     async with websockets.serve(handle_client, "0.0.0.0", port):
         print(f"Server started at ws://0.0.0.0:{port}")
         await asyncio.Future()
+
+async def end_game_timer(seconds_to_wait):
+    """
+    A background task that waits for the game to end,
+    then resets the state back to lobby.
+    """
+    global game_state, host_player_id
+    
+    await asyncio.sleep(seconds_to_wait)
+    
+    # --- LOCK STATE TO END GAME ---
+    await STATE_LOCK.acquire()
+    try:
+        if game_state == "playing":
+            print("--- GAME TIMER ENDED. Returning to lobby. ---")
+            game_state = "lobby"
+            resources.clear() # Clear any remaining coins
+            
+            # Reset scores for the new round?
+            # for p in players.values():
+            #     p['score'] = 0
+            # (Or, we can keep scores for the lobby leaderboard)
+            
+    finally:
+        STATE_LOCK.release()
+        
+    # Tell all clients to go back to the lobby
+    await broadcast_updates()
+
+
 
 async def main():
     await asyncio.gather(
