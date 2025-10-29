@@ -50,7 +50,7 @@ async def broadcast_updates():
         update = json.dumps({
             "type": "update",
             "players": visible_players, # Send the filtered list
-            "resources": resources
+            "resources": resources,
             "game_state": game_state
         })
         
@@ -262,4 +262,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
