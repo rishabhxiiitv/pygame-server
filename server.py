@@ -28,36 +28,21 @@ async def broadcast_updates():
     if not clients: # Don't do anything if no one is connected
         return
     
-    # We must send a custom message to each client
-    for client_id, client_websocket in clients.items():
-        # This is where the new visibility rule lives
-        visible_players = {}
-        for pid, pdata in players.items():
-            
-            # --- THE NEW RULE ---
-            # Rule: Player 1 (id 1) cannot see Player 2 (id 2)
-            if client_id == 1 and pid == 2:
-                continue # Player 1 skips drawing Player 2
-            
-            # Rule: Player 2 (id 2) cannot see Player 1 (id 1)
-            if client_id == 2 and pid == 1:
-                continue # Player 2 skips drawing Player 1
-            
-            # Otherwise, the player is visible
-            visible_players[pid] = pdata
-        
-        # Construct the personalized update message
-        update = json.dumps({
-            "type": "update",
-            "players": visible_players, # Send the filtered list
-            "resources": resources,
-            "game_state": game_state
-        })
-        
+    # --- NEW, SIMPLER LOGIC ---
+    # Construct one update message with ALL player data
+    update = json.dumps({
+        "type": "update",
+        "players": players, # Send the FULL, unfiltered player list
+        "resources": resources,
+        "game_state": game_state,
+        "host_player_id": host_player_id
+    })
+    
+    # Send the same update to everyone
+    for client_websocket in clients.values():
         try:
             await client_websocket.send(update)
         except websockets.exceptions.ConnectionClosed:
-            # This client disconnected, it will be cleaned up
             pass
 
 
@@ -262,5 +247,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
