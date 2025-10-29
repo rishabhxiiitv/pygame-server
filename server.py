@@ -15,6 +15,10 @@ players = {}
 resources = []
 next_player_id = 1
 next_resource_id = 1
+clients = {} 
+LOBBY_PASSWORD = ""
+game_state = "lobby" # <-- ADD THIS LINE
+
 # --- MODIFIED: Clients is now a dictionary {player_id: websocket} ---
 clients = {} 
 LOBBY_PASSWORD = "" # This will be set when the server starts
@@ -47,6 +51,7 @@ async def broadcast_updates():
             "type": "update",
             "players": visible_players, # Send the filtered list
             "resources": resources
+            "game_state": game_state
         })
         
         try:
@@ -106,6 +111,10 @@ async def handle_client(websocket):
             data = json.loads(message)
 
             if data["type"] == "move":
+                # --- NEW: Only allow movement if the game is playing ---
+                if game_state != "playing":
+                    continue
+                    
                 if player_id not in players:
                     continue
 
@@ -185,6 +194,14 @@ async def handle_client(websocket):
 
                 # --- MODIFIED: Broadcast using the new function ---
                 await broadcast_updates()
+                
+            elif data["type"] == "start_game":
+                # Only Player 1 (the host) can start the game
+                if player_id == 1 and game_state == "lobby":
+                    game_state = "playing"
+                    print("--- Game Started by Host (Player 1) ---")
+                    # Broadcast the new "playing" state to all clients
+                    await broadcast_updates()
 
     except websockets.exceptions.ConnectionClosed:
         pass # Client disconnected
@@ -245,3 +262,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
