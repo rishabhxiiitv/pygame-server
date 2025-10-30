@@ -289,7 +289,7 @@ async def server_main():
     print(f"Lobby password is set.")
     port = int(os.environ.get("PORT", 8765))
     
-    async with websockets.serve(handle_client, "0.0.0.0", port):
+    async with websockets.serve(handle_client, "0.0.0.0", port, ping_interval=20, ping_timeout=20):
         print(f"Server started at ws://0.0.0.0:{port}")
         await asyncio.Future()
 
@@ -301,3 +301,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
