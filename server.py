@@ -227,15 +227,16 @@ async def handle_client(websocket):
                 if player_id in clients:
                     del clients[player_id] 
                 
-                # Promote a new host if the host left
-                if player_id == host_player_id and game_state == "lobby":
-                    if players: 
-                        new_host_id = min(players.keys())
-                        host_player_id = new_host_id
-                        print(f"Host disconnected. Promoting Player {new_host_id} to new host.")
-                    else: 
-                        host_player_id = 0
-                        print("Last player left. Resetting host.")
+                # --- NEW: Check if the host disconnected (any time) ---
+            if player_id == host_player_id:
+                if players: # If there are still players left
+                    # Find the player with the lowest ID and promote them
+                    new_host_id = min(players.keys())
+                    host_player_id = new_host_id
+                    print(f"Host disconnected. Promoting Player {new_host_id} to new host.")
+                else: # No players left
+                    host_player_id = 0
+                    print("Last player left. Resetting host.")
         finally:
             STATE_LOCK.release() # <-- Release lock
         
@@ -334,4 +335,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
