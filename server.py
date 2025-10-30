@@ -200,6 +200,13 @@ async def handle_client(websocket):
                         asyncio.create_task(end_game_timer(duration_seconds))
                         
                         broadcast_needed = True
+                elif data["type"] == "reset_game":
+                    # Only the host can reset, and only from the leaderboard screen
+                    if player_id == host_player_id and game_state == "leaderboard":
+                        print(f"--- Host (Player {player_id}) is resetting game ---")
+                        game_state = "lobby"
+                        broadcast_needed = True
+                        
             finally:
                 STATE_LOCK.release() # <-- Release lock
             
@@ -262,6 +269,27 @@ async def spawn_resources():
         if broadcast_needed:
             await broadcast_updates()
 
+
+async def failsafe_reset_timer():
+    """
+    A 30-second failsafe in case the host disconnects 
+    from the leaderboard screen.
+    """
+    global game_state
+    await asyncio.sleep(30) # Wait 30 seconds
+    
+    await STATE_LOCK.acquire()
+    try:
+        # If we are still on the leaderboard after 30s,
+        # force a reset back to the lobby.
+        if game_state == "leaderboard":
+            print("--- Failsafe Timer: Returning to lobby ---")
+            game_state = "lobby"
+            # Broadcast this change
+            await broadcast_updates() 
+    finally:
+        STATE_LOCK.release()
+
 # --- Main Server Function (Unchanged from Render version) ---
 async def server_main():
     global LOBBY_PASSWORD
@@ -276,31 +304,26 @@ async def server_main():
 async def end_game_timer(seconds_to_wait):
     """
     A background task that waits for the game to end,
-    then resets the state back to lobby.
+    then moves the state to the leaderboard.
     """
-    global game_state, host_player_id
+    global game_state
     
     await asyncio.sleep(seconds_to_wait)
     
-    # --- LOCK STATE TO END GAME ---
     await STATE_LOCK.acquire()
     try:
         if game_state == "playing":
-            print("--- GAME TIMER ENDED. Returning to lobby. ---")
-            game_state = "lobby"
-            resources.clear() # Clear any remaining coins
-            
-            # Reset scores for the new round?
-            # for p in players.values():
-            #     p['score'] = 0
-            # (Or, we can keep scores for the lobby leaderboard)
-            
+            print("--- GAME TIMER ENDED. Moving to leaderboard. ---")
+            game_state = "leaderboard" # <-- MODIFIED
+            resources.clear() 
     finally:
         STATE_LOCK.release()
         
-    # Tell all clients to go back to the lobby
+    # Tell all clients to go to the leaderboard
     await broadcast_updates()
-
+    
+    # Start the 30-second failsafe timer
+    asyncio.create_task(failsafe_reset_timer())
 
 
 async def main():
@@ -311,3 +334,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
