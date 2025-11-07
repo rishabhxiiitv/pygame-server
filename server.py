@@ -5,7 +5,7 @@ import websockets
 import os
 import time
 
-# --- Constants (Added ping) ---
+# --- MODIFIED: Constants (Added ping) ---
 WIDTH, HEIGHT = 800, 600
 RESOURCE_SPAWN_TIME = 5
 PLAYER_SIZE = 64
@@ -24,7 +24,7 @@ game_start_time = 0
 game_end_time = 0
 STATE_LOCK = asyncio.Lock() 
 
-# --- Broadcast function (Unchanged) ---
+# --- Broadcast function ---
 async def broadcast_updates():
     if not clients:
         return
@@ -44,14 +44,12 @@ async def broadcast_updates():
         except websockets.exceptions.ConnectionClosed:
             pass
 
-# --- end_game_timer (Unchanged) ---
+# --- end_game_timer ---
 async def end_game_timer(seconds_to_wait):
     global game_state, host_player_id, next_player_id
     
-    # 1. Wait for game duration
     await asyncio.sleep(seconds_to_wait)
     
-    # 2. Move to Leaderboard state
     await STATE_LOCK.acquire()
     try:
         if game_state == "playing":
@@ -63,10 +61,8 @@ async def end_game_timer(seconds_to_wait):
         
     await broadcast_updates() 
 
-    # 3. Wait 10 seconds for leaderboard view
     await asyncio.sleep(10) 
     
-    # 4. Disconnect all clients and reset server
     await STATE_LOCK.acquire()
     try:
         print("--- Leaderboard time over. Disconnecting all clients. ---")
@@ -86,7 +82,7 @@ async def end_game_timer(seconds_to_wait):
     finally:
         STATE_LOCK.release()
 
-# --- handle_client (MODIFIED) ---
+# --- handle_client (with chat) ---
 async def handle_client(websocket):
     global next_player_id, host_player_id, game_state, game_end_time, game_start_time
     player_id = 0
@@ -136,14 +132,13 @@ async def handle_client(websocket):
         async for message in websocket:
             data = json.loads(message)
             broadcast_needed = False
-            chat_to_broadcast = None
+            chat_to_broadcast = None 
 
             await STATE_LOCK.acquire()
             try:
                 if data["type"] == "move":
                     if game_state == "playing" and player_id in players:
                         # ... (All your move/collision logic) ...
-                        # ... (This logic is unchanged) ...
                         player = players[player_id]
                         old_x, old_y = player["x"], player["y"]
                         potential_x = old_x + data["dx"]
@@ -201,16 +196,19 @@ async def handle_client(websocket):
                                 player["score"] += 1
                         broadcast_needed = True
                 
-                # --- THIS IS THE MODIFIED PART ---
+                # --- THIS IS THE RESTORED PART ---
                 elif data["type"] == "start_game":
                     if player_id == host_player_id and game_state == "lobby":
-                        # We now get total seconds directly from the client
-                        duration_seconds = data.get("duration_seconds", 120) 
-                        print(f"--- Game Started by Host (Player {player_id}) for {duration_seconds} seconds ---")
+                        # We get duration in MINUTES
+                        duration_minutes = data.get("duration", 2)
+                        duration_seconds = duration_minutes * 60
+                        print(f"--- Game Started by Host (Player {player_id}) for {duration_minutes} minutes ---")
                         game_state = "playing"
-                        game_start_time = time.time()
+                        # --- ADDED: Set countdown timer ---
+                        game_start_time = time.time() + 5 # 5 second countdown
                         game_end_time = game_start_time + duration_seconds
-                        asyncio.create_task(end_game_timer(duration_seconds))
+                        # --- MODIFIED: Start timer with countdown offset ---
+                        asyncio.create_task(end_game_timer(duration_seconds + 5))
                         broadcast_needed = True
                 
                 elif data["type"] == "chat":
