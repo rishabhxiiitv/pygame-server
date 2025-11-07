@@ -5,7 +5,7 @@ import websockets
 import os
 import time
 
-# --- MODIFIED: Constants (Added ping) ---
+# --- Constants (Added ping) ---
 WIDTH, HEIGHT = 800, 600
 RESOURCE_SPAWN_TIME = 5
 PLAYER_SIZE = 64
@@ -61,7 +61,7 @@ async def end_game_timer(seconds_to_wait):
     finally:
         STATE_LOCK.release()
         
-    await broadcast_updates() # Tell all clients to show leaderboard
+    await broadcast_updates() 
 
     # 3. Wait 10 seconds for leaderboard view
     await asyncio.sleep(10) 
@@ -136,14 +136,14 @@ async def handle_client(websocket):
         async for message in websocket:
             data = json.loads(message)
             broadcast_needed = False
-            chat_to_broadcast = None # <-- NEW
+            chat_to_broadcast = None
 
-            # --- LOCK STATE FOR ALL GAME LOGIC ---
             await STATE_LOCK.acquire()
             try:
                 if data["type"] == "move":
                     if game_state == "playing" and player_id in players:
                         # ... (All your move/collision logic) ...
+                        # ... (This logic is unchanged) ...
                         player = players[player_id]
                         old_x, old_y = player["x"], player["y"]
                         potential_x = old_x + data["dx"]
@@ -201,46 +201,43 @@ async def handle_client(websocket):
                                 player["score"] += 1
                         broadcast_needed = True
                 
+                # --- THIS IS THE MODIFIED PART ---
                 elif data["type"] == "start_game":
                     if player_id == host_player_id and game_state == "lobby":
-                        duration_minutes = data.get("duration", 2)
-                        duration_seconds = duration_minutes * 60
-                        print(f"--- Game Started by Host (Player {player_id}) for {duration_minutes} minutes ---")
+                        # We now get total seconds directly from the client
+                        duration_seconds = data.get("duration_seconds", 120) 
+                        print(f"--- Game Started by Host (Player {player_id}) for {duration_seconds} seconds ---")
                         game_state = "playing"
                         game_start_time = time.time()
                         game_end_time = game_start_time + duration_seconds
                         asyncio.create_task(end_game_timer(duration_seconds))
                         broadcast_needed = True
                 
-                # --- NEW: Handle Chat Message ---
                 elif data["type"] == "chat":
-                    if player_id in players: # Make sure player exists
+                    if player_id in players: 
                         chat_to_broadcast = {
                             "type": "chat",
                             "name": player_name,
                             "color": players[player_id]['color'],
                             "message": data["message"]
                         }
-                # --- END NEW ---
 
             finally:
-                STATE_LOCK.release() # <-- Release lock
+                STATE_LOCK.release() 
             
-            # Broadcast *after* releasing lock
             if broadcast_needed:
                 await broadcast_updates()
             
-            # --- NEW: Broadcast chat message outside the lock ---
             if chat_to_broadcast:
                 chat_message_str = json.dumps(chat_to_broadcast)
                 for client_ws in clients.values():
                     try:
                         await client_ws.send(chat_message_str)
                     except websockets.exceptions.ConnectionClosed:
-                        pass # Will be cleaned up on next loop
+                        pass 
 
-    except websockets.exceptions.ConnectionClosed:
-        print(f"Connection closed for Player {player_id}.")
+    except websockets.exceptions.ConnectionClosed as e:
+        print(f"Connection closed for Player {player_id}: {e.code} {e.reason}")
     finally:
         # 3. Handle Disconnect
         await STATE_LOCK.acquire()
@@ -295,14 +292,13 @@ async def spawn_resources():
         if broadcast_needed:
             await broadcast_updates()
 
-# --- MODIFIED: Main Server Function (Added ping) ---
+# --- Main Server Function (Added ping) ---
 async def server_main():
     global LOBBY_PASSWORD
     LOBBY_PASSWORD = os.environ.get("LOBBY_PASSWORD", "default_pass_123")
     print(f"Lobby password is set.")
     port = int(os.environ.get("PORT", 8765))
     
-    # --- ADDED PING TO KEEP CONNECTION ALIVE ---
     async with websockets.serve(handle_client, "0.0.0.0", port, ping_interval=20, ping_timeout=20):
         print(f"Server started at ws://0.0.0.0:{port}")
         await asyncio.Future()
