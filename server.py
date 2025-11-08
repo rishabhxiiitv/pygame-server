@@ -4,7 +4,7 @@ import random
 import websockets
 import os
 import time
-import datetime # NEW: For timestamps
+import datetime # For timestamps
 
 # Constants
 WIDTH, HEIGHT = 800, 600
@@ -51,7 +51,6 @@ async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
     if not clients:
         return
         
-    # NEW: Get a timestamp
     now = datetime.datetime.now()
     timestamp = now.strftime("%I:%M %p") # e.g., "02:45 PM"
 
@@ -61,14 +60,14 @@ async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
         "sender_name": sender_name,
         "sender_color": sender_color,
         "message": message,
-        "timestamp": timestamp      # --- NEW ---
+        "timestamp": timestamp
     })
     
     for client_websocket in list(clients.values()):
         try:
             await client_websocket.send(chat_payload)
         except websockets.exceptions.ConnectionClosed:
-            pass # Client will be removed by the handler
+            pass
 
 # --- NEW: System Message Broadcast Function ---
 async def broadcast_system_message(message):
@@ -93,16 +92,10 @@ async def broadcast_system_message(message):
 
 # --- NEW: Game End Timer ---
 async def end_game_timer(seconds_to_wait):
-    """
-    Waits for the game to end, moves to leaderboard for 10s,
-    then disconnects all clients and resets the server.
-    """
     global game_state, host_player_id, next_player_id
     
-    # 1. Wait for game duration
     await asyncio.sleep(seconds_to_wait)
     
-    # 2. Move to Leaderboard state
     await STATE_LOCK.acquire()
     try:
         if game_state == "playing":
@@ -112,36 +105,34 @@ async def end_game_timer(seconds_to_wait):
     finally:
         STATE_LOCK.release()
         
-    await broadcast_updates() # Tell all clients to show leaderboard
+    await broadcast_updates() 
 
-    # 3. Wait 10 seconds for leaderboard view
     await asyncio.sleep(10)
     
-    # 4. Disconnect all clients and reset server
     await STATE_LOCK.acquire()
     try:
         print("--- Leaderboard time over. Disconnecting all clients. ---")
         for client_id, client_websocket in list(clients.items()):
             try:
-                # Code 1000 = Normal Closure
                 await client_websocket.close(code=1000, reason="Game Over")
             except websockets.exceptions.ConnectionClosed:
-                pass # Already disconnected
+                pass
         
-        # Reset server state for the next lobby
         players.clear()
         clients.clear()
         resources.clear()
         game_state = "lobby"
         host_player_id = 0
-        next_player_id = 1 # Reset player IDs
+        next_player_id = 1
         
     finally:
         STATE_LOCK.release()
 
 # --- Client Handler (MODIFIED) ---
 async def handle_client(websocket):
+    # --- THIS IS THE FIX ---
     global next_player_id, host_player_id, game_state, game_end_time, game_start_time
+    # --------------------------
     player_id = 0
     player_name = ""
 
@@ -153,7 +144,6 @@ async def handle_client(websocket):
         if join_data.get("type") == "join" and join_data.get("password") == LOBBY_PASSWORD:
             await STATE_LOCK.acquire()
             try:
-                # --- Prevent joining a game in progress ---
                 if game_state != "lobby":
                     await websocket.send(json.dumps({"type": "join_fail", "reason": "Game is already in progress."}))
                     await websocket.close()
@@ -174,14 +164,13 @@ async def handle_client(websocket):
                 clients[player_id] = websocket
 
                 if len(players) == 1:
-                    host_player_id = player_id
+                    host_player_id = player_id # This now correctly updates the global
                 print(f"Player {player_id} ({player_name}) has joined.")
             finally:
                 STATE_LOCK.release()
             
             await websocket.send(json.dumps({"type": "join_success", "player_id": player_id}))
             await broadcast_updates()
-            # --- NEW: Send system message on join ---
             await broadcast_system_message(f"{player_name} has joined.")
         else:
             await websocket.send(json.dumps({"type": "join_fail", "reason": "Wrong password"}))
@@ -193,28 +182,24 @@ async def handle_client(websocket):
             data = json.loads(message)
             broadcast_needed = False
 
-            # --- NEW: Handle Chat Message ---
             if data["type"] == "chat":
                 if player_id in players:
                     message_text = data.get("message", "").strip()
-                    if message_text: # Don't broadcast empty messages
+                    if message_text:
                         sender_data = players[player_id]
                         print(f"[CHAT] {sender_data['name']}: {message_text}")
-                        # Broadcast to all clients
                         await broadcast_chat_message(
                             player_id,
                             sender_data["name"],
                             sender_data["color"],
                             message_text
                         )
-                continue # Chat message doesn't need a state lock
-            # --- END OF NEW CHAT LOGIC ---
+                continue 
 
             await STATE_LOCK.acquire()
             try:
                 if data["type"] == "move":
                     if game_state == "playing" and player_id in players:
-                        # ... (All your move/collision logic) ...
                         player = players[player_id]
                         old_x, old_y = player["x"], player["y"]
                         potential_x = old_x + data["dx"]
@@ -302,7 +287,6 @@ async def handle_client(websocket):
                 if player_id in clients:
                     del clients[player_id]
                 
-                # Promote new host if the host left (at any stage)
                 if player_id == host_player_id:
                     if players: 
                         new_host_id = min(players.keys())
@@ -312,7 +296,6 @@ async def handle_client(websocket):
                         host_player_id = 0
                         print("Last player left. Resetting host.")
                 
-                # If last player leaves, reset the server
                 if not players:
                     print("All players disconnected. Resetting server.")
                     game_state = "lobby"
@@ -320,13 +303,12 @@ async def handle_client(websocket):
                     next_player_id = 1
                     resources.clear()
                 
-                broadcast_needed = True # Need to tell others about the disconnect
+                broadcast_needed = True
         finally:
             STATE_LOCK.release()
         
         if broadcast_needed: 
             await broadcast_updates()
-            # --- NEW: Send system message on leave ---
             await broadcast_system_message(f"{player_name} has left.")
 
 # --- Resource Spawner (Unchanged) ---
