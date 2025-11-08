@@ -240,7 +240,7 @@ async def handle_client(websocket):
                             "type": "chat_broadcast",
                             "sender_id": player_id,
                             "sender_name": sender_data.get("name", "Player"),
-                            "sender_color": sender_data.get("color", TEXT_COLOR),
+                            "sender_color": sender_data.get("color", (255, 255, 255)),
                             "message": data.get("message", ""),
                             "timestamp": get_chat_timestamp()
                         }
@@ -360,3 +360,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
