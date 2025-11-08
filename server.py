@@ -16,13 +16,13 @@ players = {}
 resources = []
 next_player_id = 1
 next_resource_id = 1
-clients = {} 
+clients = {}
 LOBBY_PASSWORD = ""
 game_state = "lobby"
 host_player_id = 0
 game_start_time = 0
 game_end_time = 0
-STATE_LOCK = asyncio.Lock() 
+STATE_LOCK = asyncio.Lock()
 
 # --- Broadcast function (Unchanged) ---
 async def broadcast_updates():
@@ -44,8 +44,6 @@ async def broadcast_updates():
         except websockets.exceptions.ConnectionClosed:
             pass
 
-# --- NEW: Game End Timer ---
-
 # --- NEW: Chat Broadcast Function ---
 async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
     """Broadcasts a single chat message to all connected clients."""
@@ -65,6 +63,8 @@ async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
             await client_websocket.send(chat_payload)
         except websockets.exceptions.ConnectionClosed:
             pass # Client will be removed by the handler
+
+# --- NEW: Game End Timer ---
 # This is the new logic you requested
 async def end_game_timer(seconds_to_wait):
     """
@@ -82,14 +82,14 @@ async def end_game_timer(seconds_to_wait):
         if game_state == "playing":
             print("--- GAME TIMER ENDED. Moving to leaderboard. ---")
             game_state = "leaderboard"
-            resources.clear() 
+            resources.clear()
     finally:
         STATE_LOCK.release()
         
     await broadcast_updates() # Tell all clients to show leaderboard
 
     # 3. Wait 10 seconds for leaderboard view
-    await asyncio.sleep(10) 
+    await asyncio.sleep(10)
     
     # 4. Disconnect all clients and reset server
     await STATE_LOCK.acquire()
@@ -300,42 +300,6 @@ async def handle_client(websocket):
         if player_id != 0: 
             await broadcast_updates()
 
-    except websockets.exceptions.ConnectionClosed:
-        print(f"Connection closed for Player {player_id}.")
-    finally:
-        # 3. Handle Disconnect
-        await STATE_LOCK.acquire()
-        try:
-            if player_id in players:
-                print(f"Player {player_id} ({player_name}) has disconnected.")
-                del players[player_id]
-                if player_id in clients:
-                    del clients[player_id] 
-                
-                # Promote new host if the host left (at any stage)
-                if player_id == host_player_id:
-                    if players: 
-                        new_host_id = min(players.keys())
-                        host_player_id = new_host_id
-                        print(f"Host disconnected. Promoting Player {new_host_id} to new host.")
-                    else: 
-                        host_player_id = 0
-                        print("Last player left. Resetting host.")
-                
-                # If last player leaves, reset the server
-                if not players:
-                    print("All players disconnected. Resetting server.")
-                    game_state = "lobby"
-                    host_player_id = 0
-                    next_player_id = 1
-                    resources.clear()
-
-        finally:
-            STATE_LOCK.release()
-        
-        if player_id != 0: 
-            await broadcast_updates()
-
 # --- Resource Spawner (Unchanged) ---
 async def spawn_resources():
     global next_resource_id
@@ -358,26 +322,6 @@ async def spawn_resources():
         if broadcast_needed:
             await broadcast_updates()
 
-# --- NEW: Chat Broadcast Function ---
-async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
-    """Broadcasts a single chat message to all connected clients."""
-    if not clients:
-        return
-        
-    chat_payload = json.dumps({
-        "type": "chat_broadcast",
-        "sender_id": sender_id,
-        "sender_name": sender_name,
-        "sender_color": sender_color,
-        "message": message
-    })
-    
-    for client_websocket in list(clients.values()):
-        try:
-            await client_websocket.send(chat_payload)
-        except websockets.exceptions.ConnectionClosed:
-            pass # Client will be removed by the handler
-
 # --- Main Server Function (Unchanged) ---
 async def server_main():
     global LOBBY_PASSWORD
@@ -397,5 +341,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
