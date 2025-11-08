@@ -145,6 +145,25 @@ async def handle_client(websocket):
             data = json.loads(message)
             broadcast_needed = False
 
+            # --- NEW: Handle Chat Message ---
+        if data["type"] == "chat":
+            if player_id in players:
+                message_text = data.get("message", "").strip()
+                if message_text: # Don't broadcast empty messages
+                    sender_data = players[player_id]
+                    print(f"[CHAT] {sender_data['name']}: {message_text}")
+                    # Broadcast to all clients
+                    await broadcast_chat_message(
+                        player_id,
+                        sender_data["name"],
+                        sender_data["color"],
+                        message_text
+                    )
+            # A chat message doesn't require a full state update,
+            # so we 'continue' to the next message.
+            continue 
+        # --- END OF NEW CHAT LOGIC ---
+
             await STATE_LOCK.acquire()
             try:
                 if data["type"] == "move":
@@ -321,3 +340,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
