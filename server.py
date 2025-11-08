@@ -45,6 +45,26 @@ async def broadcast_updates():
             pass
 
 # --- NEW: Game End Timer ---
+
+# --- NEW: Chat Broadcast Function ---
+async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
+    """Broadcasts a single chat message to all connected clients."""
+    if not clients:
+        return
+        
+    chat_payload = json.dumps({
+        "type": "chat_broadcast",
+        "sender_id": sender_id,
+        "sender_name": sender_name,
+        "sender_color": sender_color,
+        "message": message
+    })
+    
+    for client_websocket in list(clients.values()):
+        try:
+            await client_websocket.send(chat_payload)
+        except websockets.exceptions.ConnectionClosed:
+            pass # Client will be removed by the handler
 # This is the new logic you requested
 async def end_game_timer(seconds_to_wait):
     """
@@ -93,7 +113,7 @@ async def end_game_timer(seconds_to_wait):
     finally:
         STATE_LOCK.release()
 
-# --- Client Handler (Simplified) ---
+# --- Client Handler (MODIFIED) ---
 async def handle_client(websocket):
     global next_player_id, host_player_id, game_state, game_end_time, game_start_time
     player_id = 0
@@ -125,7 +145,7 @@ async def handle_client(websocket):
                     "y": random.randint(PLAYER_SIZE, HEIGHT - PLAYER_SIZE),
                     "score": 0, "name": player_name, "color": player_color
                 }
-                clients[player_id] = websocket 
+                clients[player_id] = websocket
 
                 if len(players) == 1:
                     host_player_id = player_id
@@ -145,24 +165,25 @@ async def handle_client(websocket):
             data = json.loads(message)
             broadcast_needed = False
 
-            # --- NEW: Handle Chat Message ---
-        if data["type"] == "chat":
-            if player_id in players:
-                message_text = data.get("message", "").strip()
-                if message_text: # Don't broadcast empty messages
-                    sender_data = players[player_id]
-                    print(f"[CHAT] {sender_data['name']}: {message_text}")
-                    # Broadcast to all clients
-                    await broadcast_chat_message(
-                        player_id,
-                        sender_data["name"],
-                        sender_data["color"],
-                        message_text
-                    )
-            # A chat message doesn't require a full state update,
-            # so we 'continue' to the next message.
-            continue 
-        # --- END OF NEW CHAT LOGIC ---
+            # --- NEW: Handle Chat Message (Corrected Indentation) ---
+            # This logic now runs INSIDE the loop, before the state lock
+            if data["type"] == "chat":
+                if player_id in players:
+                    message_text = data.get("message", "").strip()
+                    if message_text: # Don't broadcast empty messages
+                        sender_data = players[player_id]
+                        print(f"[CHAT] {sender_data['name']}: {message_text}")
+                        # Broadcast to all clients
+                        await broadcast_chat_message(
+                            player_id,
+                            sender_data["name"],
+                            sender_data["color"],
+                            message_text
+                        )
+                # A chat message doesn't require a full state update,
+                # so we 'continue' to the next message.
+                continue 
+            # --- END OF NEW CHAT LOGIC ---
 
             await STATE_LOCK.acquire()
             try:
@@ -242,6 +263,42 @@ async def handle_client(websocket):
             
             if broadcast_needed:
                 await broadcast_updates()
+
+    except websockets.exceptions.ConnectionClosed:
+        print(f"Connection closed for Player {player_id}.")
+    finally:
+        # 3. Handle Disconnect
+        await STATE_LOCK.acquire()
+        try:
+            if player_id in players:
+                print(f"Player {player_id} ({player_name}) has disconnected.")
+                del players[player_id]
+                if player_id in clients:
+                    del clients[player_id]
+                
+                # Promote new host if the host left (at any stage)
+                if player_id == host_player_id:
+                    if players: 
+                        new_host_id = min(players.keys())
+                        host_player_id = new_host_id
+                        print(f"Host disconnected. Promoting Player {new_host_id} to new host.")
+                    else: 
+                        host_player_id = 0
+                        print("Last player left. Resetting host.")
+                
+                # If last player leaves, reset the server
+                if not players:
+                    print("All players disconnected. Resetting server.")
+                    game_state = "lobby"
+                    host_player_id = 0
+                    next_player_id = 1
+                    resources.clear()
+
+        finally:
+            STATE_LOCK.release()
+        
+        if player_id != 0: 
+            await broadcast_updates()
 
     except websockets.exceptions.ConnectionClosed:
         print(f"Connection closed for Player {player_id}.")
@@ -340,4 +397,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
