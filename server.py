@@ -3,7 +3,8 @@ import json
 import random
 import websockets
 import os
-import time # Make sure time is imported
+import time
+import datetime # NEW: For timestamps
 
 # Constants
 WIDTH, HEIGHT = 800, 600
@@ -44,18 +45,23 @@ async def broadcast_updates():
         except websockets.exceptions.ConnectionClosed:
             pass
 
-# --- NEW: Chat Broadcast Function ---
+# --- NEW: Chat Broadcast Function (With Timestamps) ---
 async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
     """Broadcasts a single chat message to all connected clients."""
     if not clients:
         return
         
+    # NEW: Get a timestamp
+    now = datetime.datetime.now()
+    timestamp = now.strftime("%I:%M %p") # e.g., "02:45 PM"
+
     chat_payload = json.dumps({
         "type": "chat_broadcast",
         "sender_id": sender_id,
         "sender_name": sender_name,
         "sender_color": sender_color,
-        "message": message
+        "message": message,
+        "timestamp": timestamp      # --- NEW ---
     })
     
     for client_websocket in list(clients.values()):
@@ -64,8 +70,28 @@ async def broadcast_chat_message(sender_id, sender_name, sender_color, message):
         except websockets.exceptions.ConnectionClosed:
             pass # Client will be removed by the handler
 
+# --- NEW: System Message Broadcast Function ---
+async def broadcast_system_message(message):
+    """Broadcasts a join/leave message to all connected clients."""
+    if not clients:
+        return
+        
+    now = datetime.datetime.now()
+    timestamp = now.strftime("%I:%M %p")
+
+    chat_payload = json.dumps({
+        "type": "system_message",
+        "message": message,
+        "timestamp": timestamp
+    })
+    
+    for client_websocket in list(clients.values()):
+        try:
+            await client_websocket.send(chat_payload)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+
 # --- NEW: Game End Timer ---
-# This is the new logic you requested
 async def end_game_timer(seconds_to_wait):
     """
     Waits for the game to end, moves to leaderboard for 10s,
@@ -155,6 +181,8 @@ async def handle_client(websocket):
             
             await websocket.send(json.dumps({"type": "join_success", "player_id": player_id}))
             await broadcast_updates()
+            # --- NEW: Send system message on join ---
+            await broadcast_system_message(f"{player_name} has joined.")
         else:
             await websocket.send(json.dumps({"type": "join_fail", "reason": "Wrong password"}))
             await websocket.close()
@@ -165,8 +193,7 @@ async def handle_client(websocket):
             data = json.loads(message)
             broadcast_needed = False
 
-            # --- NEW: Handle Chat Message (Corrected Indentation) ---
-            # This logic now runs INSIDE the loop, before the state lock
+            # --- NEW: Handle Chat Message ---
             if data["type"] == "chat":
                 if player_id in players:
                     message_text = data.get("message", "").strip()
@@ -180,9 +207,7 @@ async def handle_client(websocket):
                             sender_data["color"],
                             message_text
                         )
-                # A chat message doesn't require a full state update,
-                # so we 'continue' to the next message.
-                continue 
+                continue # Chat message doesn't need a state lock
             # --- END OF NEW CHAT LOGIC ---
 
             await STATE_LOCK.acquire()
@@ -268,6 +293,7 @@ async def handle_client(websocket):
         print(f"Connection closed for Player {player_id}.")
     finally:
         # 3. Handle Disconnect
+        broadcast_needed = False
         await STATE_LOCK.acquire()
         try:
             if player_id in players:
@@ -293,12 +319,15 @@ async def handle_client(websocket):
                     host_player_id = 0
                     next_player_id = 1
                     resources.clear()
-
+                
+                broadcast_needed = True # Need to tell others about the disconnect
         finally:
             STATE_LOCK.release()
         
-        if player_id != 0: 
+        if broadcast_needed: 
             await broadcast_updates()
+            # --- NEW: Send system message on leave ---
+            await broadcast_system_message(f"{player_name} has left.")
 
 # --- Resource Spawner (Unchanged) ---
 async def spawn_resources():
